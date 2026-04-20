@@ -123,5 +123,9 @@ __pycache__/
 Thumbs.db
 
 # Sidecars (Keep source, ignore built binaries if preferred, but usually Tauri sidecars are kept if not easily generated)
-# Un-comment the next line to ignore sidecar EXEs
 /scripts/*.exe
+
+# GitHub CLI portable (temp tool)
+gh_cli/
+gh_portable.zip
+gh_installer.msi

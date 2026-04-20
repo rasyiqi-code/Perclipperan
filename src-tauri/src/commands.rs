@@ -97,19 +97,12 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
     let _ = std::fs::remove_file(&transcript_srt);
 
     window.emit("process_log", format!("Starting Transcription (Whisper {})...", model_size)).unwrap();
-    
-    let mut script_path = window.app_handle().path_resolver().resolve_resource("../scripts/whisper_app.py")
-        .unwrap_or_else(|| PathBuf::from("../scripts/whisper_app.py"));
-    if !script_path.exists() {
-        script_path = PathBuf::from("../scripts/whisper_app.py");
-    }
 
-    let python_cmd = if cfg!(target_os = "windows") { "python" } else { "python3" };
-
-    let (mut rx_whisper, _child_whisper) = tauri::api::process::Command::new(python_cmd)
-        .args([script_path.to_str().unwrap(), "--video", &video_path, "--output-dir", output_dir_str, "--model", &model_size])
+    let (mut rx_whisper, _child_whisper) = Command::new_sidecar("whisper")
+        .map_err(|e| format!("Whisper sidecar binary missing: {}", e))?
+        .args(["--video", &video_path, "--output-dir", output_dir_str])
         .spawn()
-        .map_err(|e| format!("Failed to spawn Whisper Python process: {}", e))?;
+        .map_err(|e| format!("Failed to spawn Whisper sidecar: {}", e))?;
 
     while let Some(event) = rx_whisper.recv().await {
         match event {
@@ -136,30 +129,17 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
 
     window.emit("process_log", "Initializing Smart Analysis Engine...").unwrap();
     
-    // Nuclear Solution: Embed the Python code directly into the Rust binary
-    const LLAMA_ENGINE_CODE: &str = include_str!("../../scripts/llama_wrapper.py");
-    
-    let analyzer_path = app_dir.join("analyzer.py");
-    let analyzer_str = analyzer_path.to_string_lossy().to_string();
-
-    // Deploy the embedded engine to the data directory (Atomic Write)
-    if let Err(e) = std::fs::write(&analyzer_path, LLAMA_ENGINE_CODE) {
-        return Err(format!("Failed to deploy AI Engine: {}. Please check disk permissions.", e));
-    }
-
     let transcript_json_str = app_dir.join("transcript_output.json").to_string_lossy().to_string();
-    let output_dir_str = app_dir.to_string_lossy().to_string();
-    
-    let python_cmd = if cfg!(target_os = "windows") { "python" } else { "python3" };
+    let output_dir_str_llama = app_dir.to_string_lossy().to_string();
 
-    println!("AI_TRACE: Running Embedded Engine from -> {}", analyzer_str);
-    window.emit("process_log", "AI Engine Deployed & Stabilized.").unwrap();
+    window.emit("process_log", "Initializing Smart Analysis Engine...").unwrap();
 
-    // Positional Arguments: [Embedded Script] [Transcript Path] [Output Dir]
-    let (mut rx_llama, _child_llama) = tauri::api::process::Command::new(python_cmd)
-        .args([&analyzer_str, &transcript_json_str, &output_dir_str])
+    // Positional Arguments: [Transcript Path] [Output Dir]
+    let (mut rx_llama, _child_llama) = Command::new_sidecar("llama")
+        .map_err(|e| format!("Llama sidecar binary missing: {}", e))?
+        .args([&transcript_json_str, &output_dir_str_llama])
         .spawn()
-        .map_err(|e| format!("Failed to spawn Smart Analysis ({}): {}. Ensure Python is installed.", python_cmd, e))?;
+        .map_err(|e| format!("Failed to spawn Smart Analysis sidecar: {}", e))?;
 
     while let Some(event) = rx_llama.recv().await {
         use tauri::api::process::CommandEvent;
@@ -173,10 +153,10 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
                     window.emit("process_log", &line).unwrap();
                 }
             }
-            tauri::api::process::CommandEvent::Stderr(line) => {
+            CommandEvent::Stderr(line) => {
                 window.emit("process_log", format!("AI_DEBUG (Llama): {}", line)).unwrap();
             }
-            tauri::api::process::CommandEvent::Terminated(payload) => {
+            CommandEvent::Terminated(payload) => {
                 if payload.code != Some(0) {
                     return Err(format!("Llama Analysis failed with exit code: {:?}", payload.code));
                 }
@@ -248,42 +228,39 @@ pub async fn render_final_video(
     // Clear old state to prevent bleeding crop positions from previous videos
     let _ = std::fs::remove_file(&face_json_path);
     
-    let mut script_path = window.app_handle().path_resolver().resolve_resource("../scripts/facetracker_app.py")
-        .unwrap_or_else(|| PathBuf::from("../scripts/facetracker_app.py"));
-    if !script_path.exists() {
-        script_path = PathBuf::from("../scripts/facetracker_app.py");
-    }
+    window.emit("process_log", "AI_DEBUG: Running FaceTracker sidecar...").unwrap();
 
-    let python_cmd = if cfg!(target_os = "windows") { "python" } else { "python3" };
-
-    window.emit("process_log", format!("AI_DEBUG: Running facetractor script at: {:?}", script_path)).unwrap();
-
-    let (mut rx_face, _child_face) = tauri::api::process::Command::new(python_cmd)
-        .args([script_path.to_str().unwrap(), "--video", &video_path, "--output-dir", output_dir_str])
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Face Tracker: {}", e))?;
-
-    while let Some(event) = rx_face.recv().await {
-        match event {
-            tauri::api::process::CommandEvent::Stdout(line) => {
-                if line.starts_with("PROGRESS:") {
-                    if let Ok(p) = line.replace("PROGRESS:", "").trim().parse::<u32>() {
-                        let _ = window.emit("process_progress", p);
+    // FaceTracker is optional — gracefully skip if sidecar is missing
+    if let Ok(cmd) = Command::new_sidecar("facetracker") {
+        if let Ok((mut rx_face, _child_face)) = cmd
+            .args(["--video", &video_path, "--output-dir", output_dir_str])
+            .spawn()
+        {
+            while let Some(event) = rx_face.recv().await {
+                match event {
+                    tauri::api::process::CommandEvent::Stdout(line) => {
+                        if line.starts_with("PROGRESS:") {
+                            if let Ok(p) = line.replace("PROGRESS:", "").trim().parse::<u32>() {
+                                let _ = window.emit("process_progress", p);
+                            }
+                        } else {
+                            window.emit("process_log", &line).unwrap();
+                        }
                     }
-                } else {
-                    window.emit("process_log", &line).unwrap();
+                    tauri::api::process::CommandEvent::Stderr(line) => {
+                        window.emit("process_log", format!("AI_DEBUG (Face): {}", line)).unwrap();
+                    }
+                    tauri::api::process::CommandEvent::Terminated(payload) => {
+                        if payload.code != Some(0) {
+                            window.emit("process_log", format!("AI_WARNING: Face Tracker exited with code {:?}. Using default centering.", payload.code)).unwrap();
+                        }
+                    }
+                    _ => {}
                 }
             }
-            tauri::api::process::CommandEvent::Stderr(line) => {
-                window.emit("process_log", format!("AI_DEBUG (Face): {}", line)).unwrap();
-            }
-            tauri::api::process::CommandEvent::Terminated(payload) => {
-                if payload.code != Some(0) {
-                    window.emit("process_log", format!("AI_WARNING: Face Tracker exited with code {:?}. Using default centering.", payload.code)).unwrap();
-                }
-            }
-            _ => {}
         }
+    } else {
+        window.emit("process_log", "AI_INFO: FaceTracker sidecar not found, using centered framing.").unwrap();
     }
 
     let mut center_x_ratio = 0.5;

@@ -7,8 +7,8 @@
     "withGlobalTauri": false
   },
   "package": {
-    "productName": "ClipGenius AI V1.3",
-    "version": "1.3.0"
+    "productName": "ClipGenius AI V1.3.1",
+    "version": "1.3.1"
   },
   "tauri": {
     "allowlist": {
@@ -76,7 +76,7 @@
         "fullscreen": false,
         "height": 680,
         "resizable": true,
-        "title": "ClipGenius AI V1.3",
+        "title": "ClipGenius AI V1.3.1",
         "width": 1100,
         "theme": "Dark",
         "minWidth": 850,
