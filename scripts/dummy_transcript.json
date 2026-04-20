@@ -1,0 +1,8 @@
+{
+  "language": "en",
+  "segments": [
+    { "start": 0.0, "end": 10.0, "text": "Hello world" },
+    { "start": 10.0, "end": 20.0, "text": "This is a test" },
+    { "start": 20.0, "end": 60.0, "text": "More content here" }
+  ]
+}

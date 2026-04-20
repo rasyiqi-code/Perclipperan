@@ -1,0 +1,23 @@
+[package]
+name = "clipgenius-ai"
+version = "1.3.0"
+description = "ClipGenius AI Desktop V1.3 - Ultra-Lightweight & Multilingual"
+authors = ["Anonymous"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "1.5.0", features = [ "protocol-asset", "dialog-open", "shell-sidecar", "shell-open", "shell-execute"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["stream", "json", "rustls-tls"] }
+tokio = { version = "1.0", features = ["full"] }
+futures-util = "0.3"
+regex = "1.12.3"
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# it disables the vite dev server and instead serves the built app from the `dist` directory
+custom-protocol = ["tauri/custom-protocol"]
