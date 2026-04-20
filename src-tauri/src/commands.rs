@@ -134,7 +134,7 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
 
     window.emit("process_log", "Initializing Smart Analysis Engine...").unwrap();
 
-    // Positional Arguments: [Transcript Path] [Output Dir]
+    // Positional Arguments as expected by the new llama sidecar: [Transcript Path] [Output Dir]
     let (mut rx_llama, _child_llama) = Command::new_sidecar("llama")
         .map_err(|e| format!("Llama sidecar binary missing: {}", e))?
         .args([&transcript_json_str, &output_dir_str_llama])
