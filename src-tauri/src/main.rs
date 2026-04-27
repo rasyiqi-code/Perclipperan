@@ -13,7 +13,8 @@ fn main() {
             download_model, 
             run_whisper_analysis, 
             render_final_video,
-            show_in_folder
+            show_in_folder,
+            download_standalone_model
         ])
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {

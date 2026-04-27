@@ -94,3 +94,40 @@ pub fn calculate_deterministic_crop(dim: &VideoDimensions, center_x_ratio: f64) 
     println!("Calculated Deterministic Crop: {}x{} at {},{}", box_result.w, box_result.h, box_result.x, box_result.y);
     box_result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_landscape_crop() {
+        let dim = VideoDimensions { width: 1920, height: 1080 };
+        // 9:16 crop of 1080 height should be 607.5 width, let's see rounded
+        let crop = calculate_deterministic_crop(&dim, 0.5);
+        assert_eq!(crop.h, 1080);
+        assert_eq!(crop.w, 608); // 1080 * 9/16 = 607.5 -> rounded 608
+        // Center x should be (1920 * 0.5) - (607.5 / 2) = 960 - 303.75 = 656.25 -> 656
+        assert_eq!(crop.x, 656);
+        assert_eq!(crop.y, 0);
+    }
+
+    #[test]
+    fn test_portrait_crop() {
+        let dim = VideoDimensions { width: 1080, height: 1920 };
+        // Source is already exactly 9:16
+        let crop = calculate_deterministic_crop(&dim, 0.5);
+        assert_eq!(crop.w, 1080);
+        assert_eq!(crop.h, 1920);
+        assert_eq!(crop.x, 0);
+        assert_eq!(crop.y, 0);
+    }
+
+    #[test]
+    fn test_off_center_crop() {
+        let dim = VideoDimensions { width: 1920, height: 1080 };
+        // Face tracking found person at 10% from the left
+        let crop = calculate_deterministic_crop(&dim, 0.1);
+        // Center x should be (1920 * 0.1) - (607.5 / 2) = 192 - 303.75 = -111.75 -> clamped to 0
+        assert_eq!(crop.x, 0);
+    }
+}

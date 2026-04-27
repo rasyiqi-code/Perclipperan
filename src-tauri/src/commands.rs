@@ -3,6 +3,8 @@ use tauri::api::process::Command;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Command as StdCommand, Stdio};
+use std::io::{BufReader, BufRead};
 use futures_util::StreamExt;
 use crate::models::{AnalysisResult, VideoClip};
 use crate::video::{probe_dimensions, calculate_deterministic_crop};
@@ -82,7 +84,14 @@ pub async fn download_model(window: Window, url: String, filename: String) -> Re
 }
 
 #[tauri::command]
-pub async fn run_whisper_analysis(window: Window, video_path: String, model_size: String) -> Result<AnalysisResult, String> {
+pub async fn run_whisper_analysis(
+    window: Window, 
+    video_path: String, 
+    model_size: String,
+    llm_provider: String,
+    api_key: String,
+    llm_model: String
+) -> Result<AnalysisResult, String> {
     let app_dir = window.app_handle().path_resolver().app_data_dir().unwrap_or_else(|| PathBuf::from("./"));
     std::fs::create_dir_all(&app_dir).unwrap_or_default();
     
@@ -100,7 +109,7 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
 
     let (mut rx_whisper, _child_whisper) = Command::new_sidecar("whisper")
         .map_err(|e| format!("Whisper sidecar binary missing: {}", e))?
-        .args(["--video", &video_path, "--output-dir", output_dir_str])
+        .args(["--video", &video_path, "--output-dir", output_dir_str, "--model", &model_size])
         .spawn()
         .map_err(|e| format!("Failed to spawn Whisper sidecar: {}", e))?;
 
@@ -134,10 +143,12 @@ pub async fn run_whisper_analysis(window: Window, video_path: String, model_size
 
     window.emit("process_log", "Initializing Smart Analysis Engine...").unwrap();
 
-    // Positional Arguments as expected by the new llama sidecar: [Transcript Path] [Output Dir]
+    let app_dir_str = app_dir.to_string_lossy().to_string();
+
+    // Positional Arguments as expected by the new llama sidecar: [Transcript Path] [Output Dir] [LLM Provider] [API Key] [App Dir] [LLM Model]
     let (mut rx_llama, _child_llama) = Command::new_sidecar("llama")
         .map_err(|e| format!("Llama sidecar binary missing: {}", e))?
-        .args([&transcript_json_str, &output_dir_str_llama])
+        .args([&transcript_json_str, &output_dir_str_llama, &llm_provider, &api_key, &app_dir_str, &llm_model])
         .spawn()
         .map_err(|e| format!("Failed to spawn Smart Analysis sidecar: {}", e))?;
 
@@ -310,12 +321,13 @@ pub async fn render_final_video(
 
     window.emit("process_log", "Stage 3: High-Fidelity AI Video Generation...").unwrap();
 
+    let duration = end_time - start_time;
     let (mut rx_ffmpeg, _child_ffmpeg) = Command::new_sidecar("ffmpeg")
         .map_err(|e| format!("FFmpeg binary missing: {}", e))?
         .args([
             "-y",
             "-ss", &start_time.to_string(),
-            "-to", &end_time.to_string(),
+            "-t", &duration.to_string(),
             "-i", &video_path,
             "-filter_complex_script", filter_path.to_str().unwrap(),
             "-c:v", "libx264",
@@ -348,10 +360,7 @@ pub async fn render_final_video(
 
 #[tauri::command]
 pub fn show_in_folder(path: String) {
-    let mut path_buf = PathBuf::from(path);
-    if path_buf.is_file() {
-        path_buf.pop();
-    }
+    let path_buf = PathBuf::from(&path);
     
     #[cfg(target_os = "windows")]
     {
@@ -360,4 +369,55 @@ pub fn show_in_folder(path: String) {
             .arg(path_buf.to_str().unwrap_or(""))
             .spawn();
     }
+}
+
+#[tauri::command]
+pub async fn download_standalone_model(window: Window) -> Result<(), String> {
+    let app_dir = window.app_handle().path_resolver().app_data_dir().unwrap_or_else(|| PathBuf::from("./"));
+    std::fs::create_dir_all(&app_dir).unwrap_or_default();
+    
+    let window_clone = window.clone();
+    std::thread::spawn(move || {
+        window_clone.emit("ollama_download_progress", "Downloading Llama.cpp engine...").unwrap_or_default();
+        
+        let zip_path = app_dir.join("llama-cli.zip");
+        let _ = StdCommand::new("curl")
+            .args(["-L", "https://github.com/ggerganov/llama.cpp/releases/download/b3000/llama-b3000-bin-win-vulcan-x64.zip", "-o", zip_path.to_str().unwrap()])
+            .output();
+            
+        window_clone.emit("ollama_download_progress", "Extracting Llama.cpp engine...").unwrap_or_default();
+        
+        let _ = StdCommand::new("powershell")
+            .args(["-Command", &format!("Expand-Archive -Path '{}' -DestinationPath '{}' -Force", zip_path.to_str().unwrap(), app_dir.join("llama_bin").to_str().unwrap())])
+            .output();
+            
+        window_clone.emit("ollama_download_progress", "Downloading Phi-3 Mini (2.3GB)... This might take a while!").unwrap_or_default();
+        
+        let model_path = app_dir.join("phi-3-mini.gguf");
+        
+        if let Ok(mut child) = StdCommand::new("curl")
+            .args(["-#", "-L", "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf", "-o", model_path.to_str().unwrap()])
+            .stderr(Stdio::piped())
+            .spawn() 
+        {
+            if let Some(stderr) = child.stderr.take() {
+                let reader = BufReader::new(stderr);
+                for line in reader.split(b'\r') {
+                    if let Ok(l) = line {
+                        let progress_str = String::from_utf8_lossy(&l).to_string();
+                        let trimmed = progress_str.trim();
+                        if trimmed.len() > 0 && trimmed.contains("%") {
+                            // Extract just the percentage/progress bar for cleaner UI
+                            window_clone.emit("ollama_download_progress", format!("Downloading Phi-3: {}", trimmed)).unwrap_or_default();
+                        }
+                    }
+                }
+            }
+            let _ = child.wait();
+        }
+        
+        window_clone.emit("ollama_download_progress", "Download completed successfully!").unwrap_or_default();
+    });
+
+    Ok(())
 }

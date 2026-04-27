@@ -5,12 +5,11 @@ import { listen } from '@tauri-apps/api/event';
 import { useEffect } from 'react';
 
 interface ImportScreenProps {
-  onVideoDrop: (path: string, model: string) => void;
+  onVideoDrop: (path: string) => void;
 }
 
 export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
   const [isHovering, setIsHovering] = useState(false);
-  const [modelType, setModelType] = useState('base');
 
   // BUG-04 Fix: Use Tauri's file-drop event to get the real OS filesystem path
   useEffect(() => {
@@ -25,7 +24,7 @@ export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
             const ext = path.split('.').pop()?.toLowerCase();
             if (['mp4', 'mov', 'mkv', 'avi', 'webm'].includes(ext || '')) {
               console.log("File dropped:", path);
-              onVideoDrop(path, modelType);
+              onVideoDrop(path);
             }
           }
         }));
@@ -44,7 +43,7 @@ export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
         unlisteners.forEach(unlisten => unlisten());
       }).catch(console.error);
     };
-  }, [onVideoDrop, modelType]); // Added modelType to lexical scope deps
+  }, [onVideoDrop]);
 
   const handleBrowse = async () => {
     try {
@@ -63,7 +62,7 @@ export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
         const path = Array.isArray(selected) ? selected[0] : selected;
         if (typeof path === 'string' && path.length > 0) {
           console.log("Valid path selected, triggering onVideoDrop:", path);
-          onVideoDrop(path, modelType);
+          onVideoDrop(path);
         } else {
           console.warn("Selected item is not a valid path string:", path);
           alert("Selection error: The picked item did not provide a valid file path.");
@@ -92,7 +91,6 @@ export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
           width: '100%',
           maxWidth: '680px',
           minHeight: '300px',
-          maxHeight: '360px',
           borderRadius: '20px',
           position: 'relative'
         }}
@@ -122,33 +120,6 @@ export function ImportScreen({ onVideoDrop }: ImportScreenProps) {
         <FileVideo size={18} />
         Browse Video File
       </button>
-
-      {/* Model Selection Dropdown */}
-      <div style={{ marginTop: '24px', width: '100%', maxWidth: '320px', textAlign: 'left' }}>
-        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          AI Transcription Model
-        </label>
-        <select 
-          value={modelType}
-          onChange={(e) => setModelType(e.target.value)}
-          style={{
-             width: '100%',
-             padding: '12px 14px',
-             borderRadius: '10px',
-             background: 'rgba(15, 23, 42, 0.4)',
-             border: '1px solid var(--border-subtle)',
-             color: 'var(--text-primary)',
-             fontSize: '0.85rem',
-             outline: 'none',
-             cursor: 'pointer',
-             appearance: 'auto'
-          }}
-        >
-          <option value="base" style={{ background: '#0f172a' }}>Base 🚀 (Ngebut, Akurasi Standar)</option>
-          <option value="small" style={{ background: '#0f172a' }}>Small ⚖️ (Seimbang & Cukup Akurat)</option>
-          <option value="medium" style={{ background: '#0f172a' }}>Medium 🎯 (Lambat, Sangat Akurat)</option>
-        </select>
-      </div>
 
       <div style={{ 
         marginTop: 'auto', 
