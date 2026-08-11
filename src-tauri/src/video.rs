@@ -18,7 +18,7 @@ pub async fn probe_dimensions(video_path: &str) -> Option<VideoDimensions> {
     println!("Probing video dimensions for: {}", video_path);
     
     // FFmpeg prints info to stderr when started with -i
-    let (mut rx, _) = Command::new_sidecar("ffmpeg")
+    let (mut rx, _child) = Command::new_sidecar("ffmpeg")
         .expect("Failed to create sidecar")
         .args(["-i", video_path])
         .spawn()
